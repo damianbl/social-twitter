@@ -1,0 +1,14 @@
+<html>
+<head>
+    <title>Followers</title>
+</head>
+<body>
+<!--<h3>Hello, <span th:text="${twitterProfile.name}">Some User</span>!</h3>-->
+
+<h4>Followers:</h4>
+
+<ul>
+    <li th:each="follower:${followers}" th:text="${follower.name}">Follower</li>
+</ul>
+</body>
+</html>
