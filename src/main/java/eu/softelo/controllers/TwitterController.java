@@ -3,6 +3,7 @@ package eu.softelo.controllers;
 import com.google.common.base.Optional;
 import eu.softelo.infrastructure.caching.CacheKeys;
 import eu.softelo.infrastructure.caching.CacheService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.social.connect.ConnectionRepository;
 import org.springframework.social.twitter.api.CursoredList;
 import org.springframework.social.twitter.api.Twitter;
@@ -16,9 +17,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import javax.inject.Inject;
 import java.net.URI;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
+import java.util.*;
 
 /**
  * Created by dabl on 2014-09-12.
@@ -26,6 +25,12 @@ import java.util.List;
 @Controller
 @RequestMapping("/")
 public class TwitterController {
+    @Value("${cacheing.enabled}")
+    private Boolean cachingEnabled;
+
+    @Value("${spring.social.twitter.resource.limits.url}")
+    private String resourceLimitsUrl;
+
     private Twitter twitter;
 
     private ConnectionRepository connectionRepository;
@@ -41,7 +46,7 @@ public class TwitterController {
 
 
     @RequestMapping(method = RequestMethod.GET, value = "/")
-    public String index(Model model) {
+    public String index() {
         if (connectionRepository.findPrimaryConnection(Twitter.class) == null) {
             return "redirect:/connect/twitter";
         } else {
@@ -55,11 +60,10 @@ public class TwitterController {
             return "redirect:/connect/twitter";
         }
 
-        Twitter twitterRest = new TwitterTemplate("PSsOLMfMcPmecFmSXKx3rq4y2", "hx9ZQUJ5yj3vdlMGI9BRfRnOpFRhh0CX9AD24KfNgGaM857Vgm");
+        setLimits(TwitterResource.FOLLOWERS, TwitterOperation.LIST, model);
 
-        LinkedHashMap map = (LinkedHashMap) twitterRest.restOperations().getForObject(URI.create("https://api.twitter.com/1.1/application/rate_limit_status.json"), Object.class);
+        Optional<Object> optionalFollowers = retrieve(CacheKeys.TWITTER_FOLLOWERS);
 
-        Optional<Object> optionalFollowers = cacheService.get(CacheKeys.TWITTER_FOLLOWERS.name());
         List<TwitterProfile> allFollowers;
 
         if (optionalFollowers.isPresent()) {
@@ -72,7 +76,8 @@ public class TwitterController {
                 followers = twitter.friendOperations().getFollowersInCursor(followers.getNextCursor());
                 allFollowers.addAll(followers);
             }
-            cacheService.put(CacheKeys.TWITTER_FOLLOWERS.name(), allFollowers);
+
+            saveIfNeeded(CacheKeys.TWITTER_FOLLOWERS, allFollowers);
         }
 
         model.addAttribute("followers", allFollowers);
@@ -86,7 +91,9 @@ public class TwitterController {
             return "redirect:/connect/twitter";
         }
 
-        Optional<Object> optionalFriends = cacheService.get(CacheKeys.TWITTER_FRIENDS.name());
+        setLimits(TwitterResource.FRIENDS, TwitterOperation.LIST, model);
+
+        Optional<Object> optionalFriends = retrieve(CacheKeys.TWITTER_FRIENDS);
 
         List<TwitterProfile> allFriends;
 
@@ -100,11 +107,35 @@ public class TwitterController {
                 friends = twitter.friendOperations().getFollowersInCursor(friends.getNextCursor());
                 allFriends.addAll(friends);
             }
-            cacheService.put(CacheKeys.TWITTER_FRIENDS.name(), allFriends);
+            saveIfNeeded(CacheKeys.TWITTER_FRIENDS, allFriends);
         }
 
         model.addAttribute("friends", allFriends);
 
         return "friends";
+    }
+
+    private Optional<Object> retrieve(CacheKeys key) {
+        if (cachingEnabled) {
+            return cacheService.get(key.name());
+        } else {
+            return Optional.absent();
+        }
+    }
+
+    private void saveIfNeeded(CacheKeys key, List<TwitterProfile> allFollowers) {
+        if (cachingEnabled) {
+            cacheService.put(key.name(), allFollowers);
+        }
+    }
+
+    private void setLimits(TwitterResource resource, TwitterOperation operation, Model model) {
+        Map result = (Map) twitter.restOperations().getForObject(URI.create(resourceLimitsUrl + resource.name().toLowerCase()), Object.class);
+
+        Map resources = (Map) result.get("resources");
+
+        Map limits = (Map) ((Map) resources.get(resource.name().toLowerCase())).get("/" + resource.name().toLowerCase() + "/" + operation.name().toLowerCase());
+
+        model.addAttribute("limit", limits.get("limit")).addAttribute("remaining", limits.get("remaining"));
     }
 }
